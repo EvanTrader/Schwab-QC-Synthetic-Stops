@@ -288,11 +288,14 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         Returns:
             List of selected symbols
         """
+        # Convert to list for processing
+        fundamental_list = list(fundamental_data)
+        
         # Filter for liquid stocks above $5
-        filtered = [f for f in fundamental_data 
+        filtered = [f for f in fundamental_list 
                    if f.Price > 5 and f.HasFundamentalData and f.Symbol != self.spy]
         
-        self.Log(f"Universe selection: {len(fundamental_data)} total, {len(filtered)} after basic filters")
+        self.Log(f"Universe selection: {len(fundamental_list)} total, {len(filtered)} after basic filters")
         
         # Sort by dollar volume and take top stocks (no momentum filtering)
         selected = sorted(filtered, key=lambda x: x.DollarVolume, reverse=True)[:self.universe_size]
