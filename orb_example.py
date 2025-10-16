@@ -292,6 +292,8 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         filtered = [f for f in fundamental_data 
                    if f.Price > 5 and f.HasFundamentalData and f.Symbol != self.spy]
         
+        self.Log(f"Universe selection: {len(fundamental_data)} total, {len(filtered)} after basic filters")
+        
         # Check for 52-week high or 15-week low momentum
         momentum_stocks = []
         
@@ -331,6 +333,7 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         
         symbols = [f.Symbol for f in selected]
         self.Log(f"Universe selected: {len(symbols)} symbols (52W high/15W low momentum)")
+        self.Log(f"Momentum stocks found: {len(momentum_stocks)} out of {len(filtered)} filtered stocks")
         
         return symbols
     
@@ -368,8 +371,13 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
             return
         
         # Check if it's entry time (9:33 AM for 3-minute opening range)
-        if data.Time.hour != 9 or data.Time.minute != (30 + self.opening_range_minutes):
+        # Allow a 1-minute window for entry (9:32-9:34 AM)
+        if (data.Time.hour != 9 or 
+            data.Time.minute < (30 + self.opening_range_minutes - 1) or 
+            data.Time.minute > (30 + self.opening_range_minutes + 1)):
             return
+        
+        self.Log(f"Entry time reached: {data.Time} - Checking for entry candidates")
         
         # Find candidates for entry
         candidates = self.GetEntryCandidates()
@@ -377,6 +385,8 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         if not candidates:
             self.Log("No entry candidates found")
             return
+        
+        self.Log(f"Found {len(candidates)} entry candidates")
         
         # Place entries for top candidates
         for symbol_data in candidates[:self.max_positions]:
@@ -388,6 +398,8 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
     def GetEntryCandidates(self):
         """Get list of symbols ready for entry based on ORB criteria."""
         candidates = []
+        
+        self.Log(f"Checking {len(self.symbol_data)} symbols for entry candidates")
         
         for symbol, symbol_data in self.symbol_data.items():
             if not self.Securities.ContainsKey(symbol):
@@ -495,7 +507,7 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         """Reset daily variables."""
         self.entry_placed = False
         self.synthetic_stops.clear_all_monitoring()
-        self.Log("Daily reset completed")
+        self.Log(f"Daily reset completed at {self.Time} - Entry allowed for today")
     
     def LiquidateAll(self):
         """Liquidate all positions at end of day."""
