@@ -20,34 +20,200 @@ from AlgorithmImports import *
 from dataclasses import dataclass
 from typing import Optional
 
-# Import synthetic stops - make sure both files are in the same directory
-try:
-    from synthetic_stops import SchwabSyntheticStops
-except ImportError:
-    # Fallback: define a minimal version for testing
-    class SchwabSyntheticStops:
-        def __init__(self, algorithm):
-            self.algorithm = algorithm
-            self.synthetic_entries = {}
-            self.synthetic_stops = {}
+# =============================================================================
+# SCHWAB SYNTHETIC STOPS IMPLEMENTATION
+# =============================================================================
+
+@dataclass
+class SyntheticEntry:
+    """Tracks synthetic entry orders for Schwab rejection handling."""
+    symbol: str
+    target_price: float
+    quantity: int
+    timeout: datetime
+    side: OrderSide
+    original_order_id: Optional[str] = None
+
+@dataclass
+class SyntheticStop:
+    """Tracks synthetic stop orders for Schwab rejection handling."""
+    symbol: str
+    target_price: float
+    quantity: int
+    timeout: datetime
+    side: OrderSide
+    original_order_id: Optional[str] = None
+
+class SchwabSyntheticStops:
+    """
+    Handles Schwab's stop order restrictions with synthetic monitoring.
+    
+    This class provides high-frequency monitoring and automatic execution
+    when Schwab rejects stop orders within the bid-ask spread.
+    """
+    
+    def __init__(self, algorithm):
+        self.algorithm = algorithm
+        self.synthetic_entries = {}
+        self.synthetic_stops = {}
+        self.price_tolerance = 0.01
+        self.synthetic_timeout_minutes = 10
+    
+    def is_schwab_rejection(self, order_message: str) -> bool:
+        """Check if order rejection is due to Schwab's stop price restrictions."""
+        rejection_keywords = [
+            "stop price must be",
+            "stop order rejected", 
+            "invalid stop price",
+            "stop price outside spread"
+        ]
+        return any(keyword in order_message.lower() for keyword in rejection_keywords)
+    
+    def handle_entry_rejection(self, symbol: str, order_id: str, target_price: float, 
+                             quantity: int, rejection_message: str):
+        """Handle rejected entry orders by adding to synthetic monitoring."""
+        if symbol in self.synthetic_entries:
+            return  # Already monitoring
         
-        def is_schwab_rejection(self, message):
-            return "stop price must be" in message.lower()
+        # Add high-resolution data for monitoring
+        if not any(sub.Resolution == Resolution.Second for sub in self.algorithm.Securities[symbol].Subscriptions):
+            self.algorithm.AddEquity(symbol, Resolution.Second)
         
-        def handle_entry_rejection(self, **kwargs):
-            pass
+        self.synthetic_entries[symbol] = SyntheticEntry(
+            symbol=symbol,
+            target_price=target_price,
+            quantity=quantity,
+            timeout=self.algorithm.Time.AddMinutes(self.synthetic_timeout_minutes),
+            side=OrderSide.Buy if quantity > 0 else OrderSide.Sell,
+            original_order_id=order_id
+        )
         
-        def handle_stop_rejection(self, **kwargs):
-            pass
+        self.algorithm.Log(f"SYNTHETIC ENTRY MONITOR: {symbol} - Target={target_price:.2f}, Qty={quantity}")
+    
+    def handle_stop_rejection(self, symbol: str, order_id: str, target_price: float, 
+                            quantity: int, rejection_message: str):
+        """Handle rejected stop orders by adding to synthetic monitoring."""
+        if symbol in self.synthetic_stops:
+            return  # Already monitoring
         
-        def process_synthetic_entries(self, data):
-            pass
+        # Add high-resolution data for monitoring
+        if not any(sub.Resolution == Resolution.Second for sub in self.algorithm.Securities[symbol].Subscriptions):
+            self.algorithm.AddEquity(symbol, Resolution.Second)
         
-        def process_synthetic_stops(self, data):
-            pass
+        self.synthetic_stops[symbol] = SyntheticStop(
+            symbol=symbol,
+            target_price=target_price,
+            quantity=quantity,
+            timeout=self.algorithm.Time.AddMinutes(self.synthetic_timeout_minutes),
+            side=OrderSide.Sell if quantity < 0 else OrderSide.Buy,
+            original_order_id=order_id
+        )
         
-        def clear_all_monitoring(self):
-            pass
+        self.algorithm.Log(f"SYNTHETIC STOP MONITOR: {symbol} - Target={target_price:.2f}, Qty={quantity}")
+    
+    def process_synthetic_entries(self, data_slice):
+        """Process synthetic entry monitoring on high-frequency data."""
+        for symbol, entry in list(self.synthetic_entries.items()):
+            if not self.algorithm.Securities.ContainsKey(symbol):
+                continue
+            
+            security = self.algorithm.Securities[symbol]
+            current_price = security.Price
+            bid_price = security.BidPrice
+            ask_price = security.AskPrice
+            
+            # Check for timeout or dead stock
+            if (self.algorithm.Time >= entry.timeout or 
+                bid_price == 0 or ask_price == 0):
+                self.algorithm.Log(f"SYNTHETIC TIMEOUT: {symbol} - Removing from monitoring")
+                self.synthetic_entries.pop(symbol, None)
+                continue
+            
+            # For long entries
+            if entry.quantity > 0:
+                if ask_price > 0 and ask_price <= entry.target_price + self.price_tolerance:
+                    # Can place stop order now
+                    self.algorithm.Log(f"SYNTHETIC STOP PLACED: {symbol} - Ask={ask_price:.2f}")
+                    self.algorithm.StopMarketOrder(symbol, entry.quantity, entry.target_price, tag="Synthetic Entry")
+                    self.synthetic_entries.pop(symbol, None)
+                elif current_price > entry.target_price:
+                    # Price crossed - execute market order
+                    self.algorithm.Log(f"SYNTHETIC CROSS: {symbol} - Price={current_price:.2f}>Target={entry.target_price:.2f}")
+                    self.algorithm.MarketOrder(symbol, entry.quantity, tag="Synthetic Entry (Cross)")
+                    self.synthetic_entries.pop(symbol, None)
+            
+            # For short entries
+            else:
+                if bid_price > 0 and bid_price >= entry.target_price - self.price_tolerance:
+                    # Can place stop order now
+                    self.algorithm.Log(f"SYNTHETIC STOP PLACED: {symbol} - Bid={bid_price:.2f}")
+                    self.algorithm.StopMarketOrder(symbol, entry.quantity, entry.target_price, tag="Synthetic Entry")
+                    self.synthetic_entries.pop(symbol, None)
+                elif current_price < entry.target_price:
+                    # Price crossed - execute market order
+                    self.algorithm.Log(f"SYNTHETIC CROSS: {symbol} - Price={current_price:.2f}<Target={entry.target_price:.2f}")
+                    self.algorithm.MarketOrder(symbol, entry.quantity, tag="Synthetic Entry (Cross)")
+                    self.synthetic_entries.pop(symbol, None)
+    
+    def process_synthetic_stops(self, data_slice):
+        """Process synthetic stop monitoring on high-frequency data."""
+        for symbol, stop in list(self.synthetic_stops.items()):
+            if not self.algorithm.Securities.ContainsKey(symbol):
+                continue
+            
+            # Check if position still exists
+            current_position = int(self.algorithm.Portfolio[symbol].Quantity)
+            if current_position == 0:
+                self.algorithm.Log(f"SYNTHETIC STOP REMOVED: {symbol} - Position flat")
+                self.synthetic_stops.pop(symbol, None)
+                continue
+            
+            security = self.algorithm.Securities[symbol]
+            current_price = security.Price
+            bid_price = security.BidPrice
+            ask_price = security.AskPrice
+            
+            # Check for timeout
+            if self.algorithm.Time >= stop.timeout:
+                self.algorithm.Log(f"SYNTHETIC STOP TIMEOUT: {symbol} - Forcing market order")
+                self.algorithm.MarketOrder(symbol, stop.quantity, tag="Synthetic Stop (Timeout)")
+                self.synthetic_stops.pop(symbol, None)
+                continue
+            
+            # For long positions (need to sell)
+            if stop.quantity < 0:  # Selling to exit long
+                if bid_price > 0 and bid_price >= stop.target_price - self.price_tolerance:
+                    # Can place stop order now
+                    self.algorithm.Log(f"SYNTHETIC STOP PLACED: {symbol} - Bid={bid_price:.2f}")
+                    self.algorithm.StopMarketOrder(symbol, stop.quantity, stop.target_price, tag="Synthetic Stop")
+                    self.synthetic_stops.pop(symbol, None)
+                elif current_price < stop.target_price:
+                    # Price crossed - execute market order
+                    self.algorithm.Log(f"SYNTHETIC STOP CROSS: {symbol} - Price={current_price:.2f}<Target={stop.target_price:.2f}")
+                    self.algorithm.MarketOrder(symbol, stop.quantity, tag="Synthetic Stop (Cross)")
+                    self.synthetic_stops.pop(symbol, None)
+            
+            # For short positions (need to buy)
+            else:
+                if ask_price > 0 and ask_price <= stop.target_price + self.price_tolerance:
+                    # Can place stop order now
+                    self.algorithm.Log(f"SYNTHETIC STOP PLACED: {symbol} - Ask={ask_price:.2f}")
+                    self.algorithm.StopMarketOrder(symbol, stop.quantity, stop.target_price, tag="Synthetic Stop")
+                    self.synthetic_stops.pop(symbol, None)
+                elif current_price > stop.target_price:
+                    # Price crossed - execute market order
+                    self.algorithm.Log(f"SYNTHETIC STOP CROSS: {symbol} - Price={current_price:.2f}>Target={stop.target_price:.2f}")
+                    self.algorithm.MarketOrder(symbol, stop.quantity, tag="Synthetic Stop (Cross)")
+                    self.synthetic_stops.pop(symbol, None)
+    
+    def clear_all_monitoring(self):
+        """Clear all synthetic monitoring."""
+        self.synthetic_entries.clear()
+        self.synthetic_stops.clear()
+
+# =============================================================================
+# END SYNTHETIC STOPS IMPLEMENTATION
+# =============================================================================
 
 class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
     """
@@ -599,14 +765,3 @@ class SymbolData:
                 self.symbol, self.consolidator
             )
             self.consolidator.Dispose()
-
-
-@dataclass
-class SyntheticStop:
-    """Tracks synthetic stop orders for backup protection."""
-    symbol: str
-    target_price: float
-    quantity: int
-    timeout: datetime
-    side: OrderSide
-    original_order_id: Optional[str] = None
