@@ -294,11 +294,37 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         
         # Check for 52-week high or 15-week low momentum
         momentum_stocks = []
-        for f in filtered:
-            # Check if price is near 52-week high (within 5%) or 15-week low (within 5%)
-            if (f.Price >= f.WeekHigh52 * 0.95 or  # Within 5% of 52-week high
-                f.Price <= f.WeekLow15 * 1.05):    # Within 5% of 15-week low
-                momentum_stocks.append(f)
+        
+        # Get historical data for 52 weeks (252 trading days) and 15 weeks (75 trading days)
+        symbols = [f.Symbol for f in filtered]
+        if symbols:
+            # Get 52 weeks of daily data
+            hist_52w = self.History(symbols, 252, Resolution.Daily)
+            # Get 15 weeks of daily data  
+            hist_15w = self.History(symbols, 75, Resolution.Daily)
+            
+            for f in filtered:
+                symbol = f.Symbol
+                current_price = f.Price
+                
+                # Calculate 52-week high
+                if not hist_52w.empty and symbol in hist_52w.index.get_level_values('symbol'):
+                    symbol_data_52w = hist_52w.loc[symbol]
+                    week_high_52 = symbol_data_52w['high'].max() if not symbol_data_52w.empty else current_price
+                else:
+                    week_high_52 = current_price
+                
+                # Calculate 15-week low
+                if not hist_15w.empty and symbol in hist_15w.index.get_level_values('symbol'):
+                    symbol_data_15w = hist_15w.loc[symbol]
+                    week_low_15 = symbol_data_15w['low'].min() if not symbol_data_15w.empty else current_price
+                else:
+                    week_low_15 = current_price
+                
+                # Check if price is near 52-week high (within 5%) or 15-week low (within 5%)
+                if (current_price >= week_high_52 * 0.95 or  # Within 5% of 52-week high
+                    current_price <= week_low_15 * 1.05):    # Within 5% of 15-week low
+                    momentum_stocks.append(f)
         
         # Sort by dollar volume and take top stocks
         selected = sorted(momentum_stocks, key=lambda x: x.DollarVolume, reverse=True)[:self.universe_size]
