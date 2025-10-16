@@ -27,8 +27,9 @@ A sophisticated solution for Charles Schwab's stop order restrictions in QuantCo
 - **Schwab Rejection Detection**: Automatically identifies Schwab's stop order rejection messages
 - **High-Frequency Monitoring**: Uses second-resolution data for precise price tracking
 - **Dual Execution Strategy**: Places stop market orders when bid tightens, market orders when price crosses target
-- **Timeout Protection**: Prevents infinite monitoring with configurable timeouts
+- **Backup Stop System**: Ensures positions are fully protected with backup stops and synthetic monitoring
 - **Position Validation**: Ensures synthetic stops match actual portfolio positions
+- **Timeout Protection**: Prevents infinite monitoring with configurable timeouts
 
 ### Advanced Features
 - **Price Improvement Detection**: Adjusts stop levels based on better-than-expected fills
@@ -65,6 +66,15 @@ A sophisticated solution for Charles Schwab's stop order restrictions in QuantCo
 - **SyntheticEntry**: Tracks entry orders with target price, quantity, timeout
 - **SyntheticStop**: Tracks stop loss orders with position validation
 - **SchwabSyntheticStops**: Main handler class with monitoring logic
+
+### Backup Stop System
+The ORB example includes a comprehensive backup stop system that ensures positions are always protected:
+
+- **Position Validation**: Continuously validates that stop orders match actual portfolio positions
+- **Stop Updates**: Automatically updates stop orders when position sizes change
+- **Backup Stops**: Places additional stop orders if primary stop updates fail
+- **Synthetic Fallback**: Uses synthetic monitoring for any uncovered shares
+- **Emergency Exits**: Market orders for remaining positions if backup stops fail
 
 ## 🛠️ Installation & Usage
 

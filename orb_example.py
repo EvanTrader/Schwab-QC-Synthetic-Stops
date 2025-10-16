@@ -17,6 +17,8 @@ License: MIT
 
 from AlgorithmImports import *
 from synthetic_stops import SchwabSyntheticStops
+from dataclasses import dataclass
+from typing import Optional
 
 class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
     """
@@ -34,14 +36,14 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         self.SetEndDate(2025, 8, 9)
         self.SetCash(30000)
         
-        # Algorithm parameters
-        self.max_positions = 20
-        self.universe_size = 500
-        self.atr_threshold = 0.5
+        # Algorithm parameters (simplified for public release)
+        self.max_positions = 10
+        self.universe_size = 200
+        self.atr_threshold = 0.3
         self.atr_period = 14
         self.opening_range_minutes = 1
-        self.stop_loss_atr_distance = 0.1
-        self.stop_loss_risk_size = 0.01  # 1% portfolio risk per position
+        self.stop_loss_atr_distance = 0.15
+        self.stop_loss_risk_size = 0.02  # 2% portfolio risk per position
         
         # Initialize synthetic stops handler
         self.synthetic_stops = SchwabSyntheticStops(self)
@@ -193,6 +195,40 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         if order_event.Status in [OrderStatus.Filled, OrderStatus.PartiallyFilled]:
             if order_event.Symbol in self.symbol_data:
                 self.symbol_data[order_event.Symbol].OnOrderEvent(order_event)
+        
+        # Handle backup stops
+        if order_event.Symbol in self.symbol_data:
+            symbol_data = self.symbol_data[order_event.Symbol]
+            for backup in symbol_data.backup_stops[:]:  # Copy list to avoid modification during iteration
+                if backup.OrderId == order_event.OrderId:
+                    if order_event.Status == OrderStatus.Invalid:
+                        self.Log(f"BACKUP STOP REJECTED: {order_event.Symbol} - Adding to synthetic")
+                        # Add the rejected quantity to synthetic monitoring
+                        symbol_data.add_synthetic_protection(int(backup.Quantity))
+                        symbol_data.backup_stops.remove(backup)
+                        break
+                    
+                    self.Log(f"BACKUP STOP FILLED: {order_event.Symbol}")
+                    
+                    # Get current position after backup fill
+                    current_position = int(self.Portfolio[order_event.Symbol].Quantity)
+                    
+                    # If ANY position remains after backup fill, exit immediately at market
+                    if current_position != 0:
+                        self.Log(f"BACKUP PARTIAL: {order_event.Symbol} - Remaining={current_position}, Market exit")
+                        self.MarketOrder(order_event.Symbol, -current_position, tag="Complete exit after backup")
+                        
+                        # Cancel main stop if exists
+                        if (symbol_data.stop_loss_ticket and 
+                            symbol_data.stop_loss_ticket.Status == OrderStatus.Submitted):
+                            symbol_data.stop_loss_ticket.Cancel()
+                        
+                        # Clear all tracking
+                        symbol_data.last_stop_quantity = 0
+                        symbol_data.stop_loss_ticket = None
+                    
+                    symbol_data.backup_stops.remove(backup)
+                    break
     
     def HandleSchwabRejection(self, order_event):
         """Handle Schwab-specific order rejections with synthetic stops."""
@@ -236,6 +272,11 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         """Liquidate all positions at end of day."""
         if self.Portfolio.Invested:
             self.Log("Liquidating all positions")
+            
+            # Cancel all stops before liquidating
+            for symbol_data in self.symbol_data.values():
+                symbol_data.cancel_all_stops()
+            
             self.Liquidate()
         
         # Clear synthetic monitoring
@@ -269,6 +310,10 @@ class SymbolData:
         self.quantity = 0
         self.entry_ticket = None
         self.stop_loss_ticket = None
+        
+        # Backup stops tracking
+        self.last_stop_quantity = 0
+        self.backup_stops = []
         
         # Consolidator for opening range
         self.consolidator = algorithm.Consolidate(
@@ -382,16 +427,134 @@ class SymbolData:
             # Update quantity to actual fill
             self.quantity = actual_quantity
             
-            # Place stop loss order
+            # Place stop loss order with backup protection
             self.stop_loss_ticket = self.algorithm.StopMarketOrder(
                 self.symbol, -actual_quantity, self.stop_loss_price, tag="Stop Loss"
             )
+            
+            # Ensure position is fully protected (backup stops)
+            self.ensure_position_protected(order_event)
             
             self.algorithm.Log(
                 f"ENTRY FILLED: {self.symbol} - Qty={actual_quantity} - "
                 f"Fill={fill_price:.2f} - Stop={self.stop_loss_price:.2f}"
             )
     
+    def ensure_position_protected(self, order_event):
+        """Ensure the full position is protected with backup stops if needed."""
+        # Get actual current position from portfolio
+        current_position = int(self.algorithm.Portfolio[self.symbol].Quantity)
+        
+        # If somehow flat, clean up
+        if current_position == 0:
+            self.cancel_all_stops()
+            return
+        
+        # Desired stop quantity (opposite of position)
+        desired_stop_qty = -current_position
+        
+        # CASE 1: No stop exists yet - create it
+        if (self.stop_loss_ticket is None or 
+            self.stop_loss_ticket.Status == OrderStatus.Canceled or
+            self.stop_loss_ticket.Status == OrderStatus.Invalid):
+            
+            self.algorithm.Log(f"STOP CREATE: {self.symbol} - Position={current_position}, StopQty={desired_stop_qty}")
+            self.stop_loss_ticket = self.algorithm.StopMarketOrder(
+                self.symbol, desired_stop_qty, self.stop_loss_price, tag="ATR Stop"
+            )
+            self.last_stop_quantity = desired_stop_qty
+            self.quantity = current_position
+            return
+        
+        # CASE 2: Stop exists but wrong size - UPDATE IT!
+        if self.last_stop_quantity != desired_stop_qty:
+            self.algorithm.Log(f"STOP UPDATE NEEDED: {self.symbol} - Current={self.last_stop_quantity}, Desired={desired_stop_qty}")
+            
+            # Try atomic update
+            update_fields = UpdateOrderFields()
+            update_fields.Quantity = desired_stop_qty
+            update_fields.StopPrice = self.stop_loss_price
+            update_fields.Tag = f"ATR Stop (Updated for {current_position} shares)"
+            
+            response = self.stop_loss_ticket.Update(update_fields)
+            
+            if response.IsSuccess:
+                self.algorithm.Log(f"STOP UPDATE SUCCESS: {self.symbol} - NewQty={desired_stop_qty}")
+                self.last_stop_quantity = desired_stop_qty
+                self.quantity = current_position
+            else:
+                # UPDATE FAILED - Place backup stop for uncovered shares
+                uncovered_qty = desired_stop_qty - self.last_stop_quantity
+                self.algorithm.Log(f"STOP UPDATE FAILED: {self.symbol} - Placing backup for {uncovered_qty} shares")
+                
+                backup_stop = self.algorithm.StopMarketOrder(
+                    self.symbol, uncovered_qty, self.stop_loss_price, tag="Backup Stop"
+                )
+                self.backup_stops.append(backup_stop)
+                
+                # Add synthetic protection for uncovered shares
+                self.add_synthetic_protection(uncovered_qty)
+        else:
+            self.algorithm.Log(f"STOP CORRECT: {self.symbol} - Already protecting {current_position} shares")
+    
+    def add_synthetic_protection(self, uncovered_qty):
+        """Add synthetic protection for uncovered shares."""
+        # Get current position and validate FIRST
+        current_position = int(self.algorithm.Portfolio[self.symbol].Quantity)
+        if current_position == 0:
+            return  # No position to protect
+        
+        # Calculate what's already protected
+        already_protected = self.last_stop_quantity
+        if self.symbol in self.algorithm.synthetic_stops.synthetic_stops:
+            already_protected += self.algorithm.synthetic_stops.synthetic_stops[self.symbol].quantity
+        
+        # Check if we need any protection
+        actually_needed = abs(current_position) - abs(already_protected)
+        if actually_needed <= 0:
+            self.algorithm.Log(f"SYNTHETIC SKIP: {self.symbol} - Already fully protected")
+            return
+        
+        # Only add what's actually needed
+        to_add = min(abs(uncovered_qty), actually_needed) * (1 if uncovered_qty > 0 else -1)
+        
+        # Add uncovered shares to synthetic stop monitoring
+        if self.symbol not in self.algorithm.synthetic_stops.synthetic_stops:
+            self.algorithm.synthetic_stops.synthetic_stops[self.symbol] = SyntheticStop(
+                symbol=self.symbol,
+                target_price=self.stop_loss_price,
+                quantity=to_add,
+                timeout=self.algorithm.Time.AddMinutes(10),
+                side=OrderSide.Sell if current_position > 0 else OrderSide.Buy,
+                original_order_id=None
+            )
+            
+            # Add high-resolution data for monitoring
+            if not any(sub.Resolution == Resolution.Second for sub in self.algorithm.Securities[self.symbol].Subscriptions):
+                self.algorithm.AddEquity(self.symbol, Resolution.Second)
+            
+            self.algorithm.Log(f"SYNTHETIC PROTECTION ADDED: {self.symbol} - Qty={to_add}")
+        else:
+            # Accumulate with existing synthetic stop
+            existing_stop = self.algorithm.synthetic_stops.synthetic_stops[self.symbol]
+            existing_stop.quantity += to_add
+            self.algorithm.Log(f"SYNTHETIC PROTECTION ACCUMULATED: {self.symbol} - Added={to_add}, Total={existing_stop.quantity}")
+    
+    def cancel_all_stops(self):
+        """Cancel all stops and clean up tracking."""
+        # Cancel main stop
+        if (self.stop_loss_ticket and 
+            (self.stop_loss_ticket.Status == OrderStatus.Submitted or 
+             self.stop_loss_ticket.Status == OrderStatus.PartiallyFilled)):
+            self.stop_loss_ticket.Cancel()
+        
+        # Cancel any backup stops
+        for backup in self.backup_stops:
+            if backup.Status == OrderStatus.Submitted:
+                backup.Cancel()
+        self.backup_stops.clear()
+        self.last_stop_quantity = 0
+
     def Dispose(self):
         """Clean up resources."""
         if self.consolidator:
@@ -399,3 +562,14 @@ class SymbolData:
                 self.symbol, self.consolidator
             )
             self.consolidator.Dispose()
+
+
+@dataclass
+class SyntheticStop:
+    """Tracks synthetic stop orders for backup protection."""
+    symbol: str
+    target_price: float
+    quantity: int
+    timeout: datetime
+    side: OrderSide
+    original_order_id: Optional[str] = None
