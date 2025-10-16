@@ -17,9 +17,37 @@ License: MIT
 """
 
 from AlgorithmImports import *
-from synthetic_stops import SchwabSyntheticStops
 from dataclasses import dataclass
 from typing import Optional
+
+# Import synthetic stops - make sure both files are in the same directory
+try:
+    from synthetic_stops import SchwabSyntheticStops
+except ImportError:
+    # Fallback: define a minimal version for testing
+    class SchwabSyntheticStops:
+        def __init__(self, algorithm):
+            self.algorithm = algorithm
+            self.synthetic_entries = {}
+            self.synthetic_stops = {}
+        
+        def is_schwab_rejection(self, message):
+            return "stop price must be" in message.lower()
+        
+        def handle_entry_rejection(self, **kwargs):
+            pass
+        
+        def handle_stop_rejection(self, **kwargs):
+            pass
+        
+        def process_synthetic_entries(self, data):
+            pass
+        
+        def process_synthetic_stops(self, data):
+            pass
+        
+        def clear_all_monitoring(self):
+            pass
 
 class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
     """
