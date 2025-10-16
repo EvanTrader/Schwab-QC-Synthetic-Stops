@@ -258,14 +258,14 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         
         # Schedule daily operations
         self.Schedule.On(
-            DateRules.EveryDay(),
-            TimeRules.AfterMarketOpen(self.spy, 0),
+            self.date_rules.every_day(),
+            self.time_rules.after_market_open(self.spy, 0),
             self.ResetDaily
         )
         
         self.Schedule.On(
-            DateRules.EveryDay(),
-            TimeRules.BeforeMarketClose(self.spy, 1),
+            self.date_rules.every_day(),
+            self.time_rules.before_market_close(self.spy, 1),
             self.LiquidateAll
         )
         
