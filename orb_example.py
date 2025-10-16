@@ -84,7 +84,7 @@ class SchwabSyntheticStops:
             target_price=target_price,
             quantity=quantity,
             timeout=self.algorithm.Time.AddMinutes(self.synthetic_timeout_minutes),
-            side=OrderSide.Buy if quantity > 0 else OrderSide.Sell,
+            side=1 if quantity > 0 else -1,  # OrderSide.Buy = 1, OrderSide.Sell = -1
             original_order_id=order_id
         )
         
@@ -105,7 +105,7 @@ class SchwabSyntheticStops:
             target_price=target_price,
             quantity=quantity,
             timeout=self.algorithm.Time.AddMinutes(self.synthetic_timeout_minutes),
-            side=OrderSide.Sell if quantity < 0 else OrderSide.Buy,
+            side=-1 if quantity < 0 else 1,  # OrderSide.Sell = -1, OrderSide.Buy = 1
             original_order_id=order_id
         )
         
@@ -274,7 +274,7 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         self.entry_placed = False
         
         # Warm up indicators
-        self.SetWarmUp(TimeSpan.FromDays(2 * self.atr_period))
+        self.SetWarmUp(timedelta(days=2 * self.atr_period))
         
         self.Log("Opening Range Breakout Algorithm with Schwab Synthetic Stops initialized")
     
@@ -521,7 +521,7 @@ class SymbolData:
         # Consolidator for opening range
         self.consolidator = algorithm.Consolidate(
             self.symbol, 
-            TimeSpan.FromMinutes(opening_range_minutes),
+            timedelta(minutes=opening_range_minutes),
             self.OnDataConsolidated
         )
     
@@ -728,7 +728,7 @@ class SymbolData:
                 target_price=self.stop_loss_price,
                 quantity=to_add,
                 timeout=self.algorithm.Time.AddMinutes(10),
-                side=OrderSide.Sell if current_position > 0 else OrderSide.Buy,
+                side=-1 if current_position > 0 else 1,  # OrderSide.Sell = -1, OrderSide.Buy = 1
                 original_order_id=None
             )
             
