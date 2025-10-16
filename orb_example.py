@@ -273,7 +273,7 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         self.symbol_data = {}
         self.entry_placed = False
         
-        # Warm up indicators (reduced from 2x to 1x ATR period)
+        # Warm up indicators (just need enough for ATR calculation)
         self.SetWarmUp(timedelta(days=self.atr_period))
         
         self.Log("Opening Range Breakout Algorithm with Schwab Synthetic Stops initialized")
@@ -294,46 +294,11 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         
         self.Log(f"Universe selection: {len(fundamental_data)} total, {len(filtered)} after basic filters")
         
-        # Check for 52-week high or 15-week low momentum
-        momentum_stocks = []
-        
-        # Get historical data for 52 weeks (252 trading days) and 15 weeks (75 trading days)
-        symbols = [f.Symbol for f in filtered]
-        if symbols:
-            # Get 52 weeks of daily data
-            hist_52w = self.History(symbols, 252, Resolution.Daily)
-            # Get 15 weeks of daily data  
-            hist_15w = self.History(symbols, 75, Resolution.Daily)
-            
-            for f in filtered:
-                symbol = f.Symbol
-                current_price = f.Price
-                
-                # Calculate 52-week high
-                if not hist_52w.empty and symbol in hist_52w.index.get_level_values('symbol'):
-                    symbol_data_52w = hist_52w.loc[symbol]
-                    week_high_52 = symbol_data_52w['high'].max() if not symbol_data_52w.empty else current_price
-                else:
-                    week_high_52 = current_price
-                
-                # Calculate 15-week low
-                if not hist_15w.empty and symbol in hist_15w.index.get_level_values('symbol'):
-                    symbol_data_15w = hist_15w.loc[symbol]
-                    week_low_15 = symbol_data_15w['low'].min() if not symbol_data_15w.empty else current_price
-                else:
-                    week_low_15 = current_price
-                
-                # Check if price is near 52-week high (within 5%) or 15-week low (within 5%)
-                if (current_price >= week_high_52 * 0.95 or  # Within 5% of 52-week high
-                    current_price <= week_low_15 * 1.05):    # Within 5% of 15-week low
-                    momentum_stocks.append(f)
-        
-        # Sort by dollar volume and take top stocks
-        selected = sorted(momentum_stocks, key=lambda x: x.DollarVolume, reverse=True)[:self.universe_size]
+        # Sort by dollar volume and take top stocks (no momentum filtering)
+        selected = sorted(filtered, key=lambda x: x.DollarVolume, reverse=True)[:self.universe_size]
         
         symbols = [f.Symbol for f in selected]
-        self.Log(f"Universe selected: {len(symbols)} symbols (52W high/15W low momentum)")
-        self.Log(f"Momentum stocks found: {len(momentum_stocks)} out of {len(filtered)} filtered stocks")
+        self.Log(f"Universe selected: {len(symbols)} symbols (top liquidity)")
         
         return symbols
     

@@ -116,7 +116,7 @@ class MyAlgorithm(QCAlgorithm):
 ### Complete ORB Example
 
 See `orb_example.py` for a full Opening Range Breakout implementation that demonstrates:
-- Universe selection (52-week high/15-week low momentum stocks)
+- Universe selection (top liquidity stocks by dollar volume)
 - ORB entry logic with synthetic stops
 - Risk management with ATR-based stops
 - Daily position management
