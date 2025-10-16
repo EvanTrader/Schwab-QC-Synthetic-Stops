@@ -15,7 +15,7 @@ A sophisticated solution for Charles Schwab's stop order restrictions in QuantCo
 - Market orders execute immediately at potentially worse prices
 - Manual monitoring is impractical for high-frequency strategies
 
-**Our solution:**
+**My solution:**
 - **Automatic detection** of Schwab's specific rejection messages
 - **High-frequency monitoring** (second resolution) of price movements
 - **Intelligent execution** with stop market orders when possible, market orders when necessary
@@ -121,15 +121,15 @@ See `orb_example.py` for a full Opening Range Breakout implementation that demon
 - Risk management with ATR-based stops
 - Daily position management
 
-**⚠️ Important Note**: The ORB example uses completely random parameters that have not been tested or optimized. It serves as a boilerplate to demonstrate synthetic stops integration and should not be used for live trading without proper backtesting and parameter optimization.
+**⚠️ Important Note**: The ORB example uses completely random parameters that have not been tested or optimized. It serves as a boilerplate to demonstrate synthetic stops integration during wide bid ask spreads, and should not be used for live trading.
 
 ## ⚙️ Configuration
 
 ### Algorithm Parameters
 ```python
 # Risk management
-self.stop_loss_risk_size = 0.01  # 1% portfolio risk per position
-self.stop_loss_atr_distance = 0.1  # ATR multiplier for stop distance
+self.stop_loss_risk_size = 0.02  # 2% portfolio risk per position
+self.stop_loss_atr_distance = 0.15  # ATR multiplier for stop distance
 
 # Synthetic stops
 self.synthetic_timeout_minutes = 10  # Full trading day timeout
