@@ -273,8 +273,8 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         self.symbol_data = {}
         self.entry_placed = False
         
-        # Warm up indicators
-        self.SetWarmUp(timedelta(days=2 * self.atr_period))
+        # Warm up indicators (reduced from 2x to 1x ATR period)
+        self.SetWarmUp(timedelta(days=self.atr_period))
         
         self.Log("Opening Range Breakout Algorithm with Schwab Synthetic Stops initialized")
     
@@ -370,11 +370,8 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         if self.entry_placed:
             return
         
-        # Check if it's entry time (9:33 AM for 3-minute opening range)
-        # Allow a 1-minute window for entry (9:32-9:34 AM)
-        if (data.Time.hour != 9 or 
-            data.Time.minute < (30 + self.opening_range_minutes - 1) or 
-            data.Time.minute > (30 + self.opening_range_minutes + 1)):
+        # Check if it's after opening range (9:33 AM or later)
+        if data.Time.hour < 9 or (data.Time.hour == 9 and data.Time.minute < 33):
             return
         
         self.Log(f"Entry time reached: {data.Time} - Checking for entry candidates")
