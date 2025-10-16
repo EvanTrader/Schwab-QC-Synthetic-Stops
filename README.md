@@ -145,6 +145,51 @@ self.SetBrokerageModel(BrokerageName.CharlesSchwab, AccountType.Margin)
 self.SetBrokerageModel(BrokerageName.Alpaca, AccountType.Margin)
 ```
 
+### Proactive Spread Detection (Optional)
+For lower latency, you can detect wide bid/ask spreads before placing stop orders and go directly to synthetic monitoring:
+
+```python
+def should_use_synthetic_stops(self, symbol, stop_price):
+    """Check if bid/ask spread is too wide for stop orders."""
+    if self.BrokerageName != BrokerageName.CharlesSchwab:
+        return False
+    
+    security = self.Securities[symbol]
+    if not security.HasData:
+        return False
+    
+    bid_ask_spread = security.AskPrice - security.BidPrice
+    spread_threshold = security.Price * 0.005  # 0.5% of current price
+    
+    # If spread is wide, use synthetic stops directly
+    if bid_ask_spread > spread_threshold:
+        self.Log(f"Wide spread detected for {symbol}: {bid_ask_spread:.4f} > {spread_threshold:.4f}")
+        return True
+    
+    return False
+
+def place_stop_with_spread_check(self, symbol, quantity, stop_price):
+    """Place stop order with proactive spread detection."""
+    if self.should_use_synthetic_stops(symbol, stop_price):
+        # Go directly to synthetic monitoring (skip rejection round trip)
+        self.synthetic_stops.add_synthetic_stop(
+            symbol=symbol,
+            target_price=stop_price,
+            quantity=quantity,
+            order_id=None
+        )
+        self.Log(f"Proactive synthetic stop for {symbol} at {stop_price}")
+    else:
+        # Place normal stop order
+        self.StopMarketOrder(symbol, quantity, stop_price)
+```
+
+**Benefits of Proactive Detection:**
+- **Lower latency**: No waiting for rejection round trip
+- **Better execution**: Synthetic monitoring starts immediately
+- **Reduced order traffic**: Fewer rejected orders to Schwab
+- **Configurable thresholds**: Adjust spread tolerance as needed
+
 ## 📈 Performance Characteristics
 
 ### Computational Overhead
