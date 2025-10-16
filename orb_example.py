@@ -503,7 +503,7 @@ class SymbolData:
         self.symbol = security.Symbol
         
         # Indicators
-        self.atr = algorithm.ATR(self.symbol, atr_period, Resolution.Daily)
+        self.atr = algorithm.ATR(self.symbol, atr_period)
         self.volume_sma = SimpleMovingAverage(atr_period)
         
         # Opening range data
