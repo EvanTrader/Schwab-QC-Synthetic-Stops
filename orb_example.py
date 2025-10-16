@@ -552,8 +552,8 @@ class SymbolData:
         self.volume_sma.Update(bar.EndTime, bar.Volume)
         
         # Calculate relative volume
-        if self.volume_sma.IsReady and self.volume_sma > 0:
-            self.relative_volume = bar.Volume / self.volume_sma
+        if self.volume_sma.IsReady and self.volume_sma.Current.Value > 0:
+            self.relative_volume = bar.Volume / self.volume_sma.Current.Value
         
         # Store opening bar
         self.opening_bar = bar
