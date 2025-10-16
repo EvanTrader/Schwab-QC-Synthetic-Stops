@@ -31,7 +31,7 @@ class SyntheticEntry:
     target_price: float
     quantity: int
     timeout: datetime
-    side: OrderSide
+    side: int  # OrderSide.Buy = 1, OrderSide.Sell = -1
     original_order_id: Optional[str] = None
 
 @dataclass
@@ -41,7 +41,7 @@ class SyntheticStop:
     target_price: float
     quantity: int
     timeout: datetime
-    side: OrderSide
+    side: int  # OrderSide.Buy = 1, OrderSide.Sell = -1
     original_order_id: Optional[str] = None
 
 class SchwabSyntheticStops:
