@@ -80,8 +80,13 @@ The ORB example includes a comprehensive backup stop system that ensures positio
 
 ### Basic Integration
 
+The synthetic stops implementation is included directly in `orb_example.py`. To use it in your own algorithm:
+
 ```python
-from synthetic_stops import SchwabSyntheticStops
+# Copy the synthetic stops classes from orb_example.py:
+# - SyntheticEntry
+# - SyntheticStop  
+# - SchwabSyntheticStops
 
 class MyAlgorithm(QCAlgorithm):
     def Initialize(self):
