@@ -6,10 +6,11 @@ This example demonstrates how to integrate Schwab synthetic stops into a basic
 Opening Range Breakout strategy using QuantConnect and Python.
 
 Strategy Overview:
-- Universe: Top 500 stocks by volume that hit 52-week high monthly
-- Entry: Breakout above/below 1-minute opening range
+- Universe: 200 stocks with 52-week high/15-week low momentum
+- Entry: Breakout above/below 3-minute opening range
 - Risk Management: ATR-based stop losses with synthetic stop handling
 - Broker: Charles Schwab (with synthetic stops) or other brokers (standard stops)
+- Positions: Maximum 8 concurrent positions
 
 Author: Evan L
 License: MIT
@@ -37,11 +38,11 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         self.SetCash(30000)
         
         # Algorithm parameters (simplified for public release)
-        self.max_positions = 10
+        self.max_positions = 8
         self.universe_size = 200
-        self.atr_threshold = 0.3
+        self.atr_threshold = 0.7
         self.atr_period = 14
-        self.opening_range_minutes = 1
+        self.opening_range_minutes = 3
         self.stop_loss_atr_distance = 0.15
         self.stop_loss_risk_size = 0.02  # 2% portfolio risk per position
         
@@ -85,7 +86,7 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
     
     def SelectUniverse(self, fundamental_data):
         """
-        Select universe of top 500 stocks by volume that hit 52-week high.
+        Select universe of top stocks by volume that hit 52-week high or 15-week low.
         
         Args:
             fundamental_data: Fundamental data for universe selection
@@ -97,11 +98,19 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         filtered = [f for f in fundamental_data 
                    if f.Price > 5 and f.HasFundamentalData and f.Symbol != self.spy]
         
-        # Sort by dollar volume and take top 500
-        selected = sorted(filtered, key=lambda x: x.DollarVolume, reverse=True)[:self.universe_size]
+        # Check for 52-week high or 15-week low momentum
+        momentum_stocks = []
+        for f in filtered:
+            # Check if price is near 52-week high (within 5%) or 15-week low (within 5%)
+            if (f.Price >= f.WeekHigh52 * 0.95 or  # Within 5% of 52-week high
+                f.Price <= f.WeekLow15 * 1.05):    # Within 5% of 15-week low
+                momentum_stocks.append(f)
+        
+        # Sort by dollar volume and take top stocks
+        selected = sorted(momentum_stocks, key=lambda x: x.DollarVolume, reverse=True)[:self.universe_size]
         
         symbols = [f.Symbol for f in selected]
-        self.Log(f"Universe selected: {len(symbols)} symbols")
+        self.Log(f"Universe selected: {len(symbols)} symbols (52W high/15W low momentum)")
         
         return symbols
     
@@ -138,7 +147,7 @@ class OpeningRangeBreakoutAlgorithm(QCAlgorithm):
         if self.entry_placed:
             return
         
-        # Check if it's entry time (9:31 AM)
+        # Check if it's entry time (9:33 AM for 3-minute opening range)
         if data.Time.hour != 9 or data.Time.minute != (30 + self.opening_range_minutes):
             return
         
