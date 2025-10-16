@@ -545,7 +545,7 @@ class SymbolData:
     
     def OnDataConsolidated(self, bar):
         """Handle consolidated bar data for opening range."""
-        if self.opening_bar and self.opening_bar.Time.Date == bar.Time.Date:
+        if self.opening_bar and self.opening_bar.Time.date() == bar.Time.date():
             return
         
         # Update volume SMA
